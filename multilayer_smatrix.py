@@ -44,7 +44,31 @@ def S_layer(omega: np.ndarray, c_p: float, d: float,
     Z = np.zeros_like(E, dtype=complex)
     return (Z, E, E, Z)
 
+# ---------- 阻抗片（等效二端口，以 T 域注入后转 S） ----------
+
+def S_impedance_sheet(omega: np.ndarray, ZL: float, ZR: float,
+                      m_prime: float = 0.0, R_prime: float = 0.0,
+                      K_n: Optional[float] = None, tan_delta: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    串联界面阻抗片：
+      Z_sheet(ω) = jω m' + R' + K_n*(ω)/(jω), 其中 K_n*(ω) = K_n * (1 + j*tanδ)（若给定）
+    该元件的 T 矩阵： [[1, Z_sheet],[0,1]] ，端口参考为左右介质阻抗 ZL, ZR
+    返回相应的 S-矩阵。
+    """
+    Kstar = 0.0
+    if K_n is not None:
+        if tan_delta is None: tan_delta = 0.0
+        Kstar = K_n * (1.0 + 1j * tan_delta)
+    Z_sheet = 1j * omega * m_prime + R_prime + (Kstar / (1j * omega) if K_n is not None else 0.0)
+    # 组装 T，再转 S
+    T = np.zeros((omega.shape[0], 2, 2), dtype=complex)
+    T[:, 0, 0] = 1.0
+    T[:, 1, 1] = 1.0
+    T[:, 0, 1] = Z_sheet
+    T[:, 1, 0] = 0.0
+    return T_to_S(T, ZL, ZR)
 # ---------- T ↔ S 转换（用于阻抗片等“二端口”从 T 域注入） ----------
+
 def T_to_S(T: np.ndarray, ZL: float, ZR: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     将 T 矩阵（形状 [F,2,2] 或 [2,2]）转为 S 矩阵（四个 [F] 或标量）。
@@ -78,8 +102,8 @@ def S_to_T(S: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], ZL: float, 
     D = ((1 - S11) * (1 + S22) + S12 * S21) / (2 * S21)
     T = np.stack([np.stack([A, B], -1), np.stack([C, D], -1)], -2)  # [F,2,2]
     return T
-
 # ---------- Redheffer 星积 ----------
+
 def star(SA: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
          SB: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
          eps: float = 1e-18) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -114,29 +138,6 @@ def fold_star(blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     for b in blocks[1:]:
         S = star(S, b, eps=eps)
     return S
-
-# ---------- 阻抗片（等效二端口，以 T 域注入后转 S） ----------
-def S_impedance_sheet(omega: np.ndarray, ZL: float, ZR: float,
-                      m_prime: float = 0.0, R_prime: float = 0.0,
-                      K_n: Optional[float] = None, tan_delta: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    串联界面阻抗片：
-      Z_sheet(ω) = jω m' + R' + K_n*(ω)/(jω), 其中 K_n*(ω) = K_n * (1 + j*tanδ)（若给定）
-    该元件的 T 矩阵： [[1, Z_sheet],[0,1]] ，端口参考为左右介质阻抗 ZL, ZR
-    返回相应的 S-矩阵。
-    """
-    Kstar = 0.0
-    if K_n is not None:
-        if tan_delta is None: tan_delta = 0.0
-        Kstar = K_n * (1.0 + 1j * tan_delta)
-    Z_sheet = 1j * omega * m_prime + R_prime + (Kstar / (1j * omega) if K_n is not None else 0.0)
-    # 组装 T，再转 S
-    T = np.zeros((omega.shape[0], 2, 2), dtype=complex)
-    T[:, 0, 0] = 1.0
-    T[:, 1, 1] = 1.0
-    T[:, 0, 1] = Z_sheet
-    T[:, 1, 0] = 0.0
-    return T_to_S(T, ZL, ZR)
 
 # ---------- 输出核 ----------
 def gamma_in_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
