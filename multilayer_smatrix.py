@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 # multilayer_smatrix.py
 # 1D 正向入射、压力幅值规范。支持：幂律衰减、显式层、界面、阻抗片、Redheffer星积。
-
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Callable
+
 
 # ---------- 衰减模型 ----------
 def alpha_powerlaw(omega: np.ndarray, alpha0: float, n: float, omega0: float) -> np.ndarray:
@@ -32,41 +32,158 @@ def S_interface(Za: float, Zb: float) -> Tuple[np.ndarray, np.ndarray, np.ndarra
     tab = 2 * Zb / (Zb + Za)
     tba = 2 * Za / (Zb + Za)
     # 让它们都成为0维 array，便于与频率维广播
-    return (np.asarray(r), np.asarray(tba), np.asarray(tab), np.asarray(-r))
+    return np.asarray(r), np.asarray(tba), np.asarray(tab), np.asarray(-r)
 
-def S_layer(omega: np.ndarray, c_p: float, d: float,
-            alpha_np_per_m: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+
+def complex_k_powerlaw(omega: np.ndarray,
+                       c0: float,
+                       alpha0: float,
+                       n: float,
+                       omega0: float,
+                       omega_ref: Optional[float] = None) -> np.ndarray:
     """
-    均匀层块： S = [[0, E],[E, 0]] ，E = exp(-γ d)
+    因果幂律介质的复波数 k(ω) = ω/c0 + Δβ(ω) - i α(ω)
+    α(ω) = α0 * (ω/ω0)^n  （单位：Np/m）
+    Δβ(ω) = α(ω) * cot(π n / 2)        (n ∈ (0,2), n != 1)
+    n = 1 时：Δβ(ω) = (2 α0 / π) * ω * ln(ω / ω_ref)
     """
-    gamma = gamma_from_params(omega, c_p, d, alpha_np_per_m)
-    E = np.exp(-gamma * d)   # 形状: [F]
+    # 幂律衰减（Np/m）
+    alpha = alpha0 * (omega / omega0) ** n
+
+    # 因果色散修正
+    if abs(n - 1.0) > 1e-8:
+        # Δβ = α * cot(π n / 2)；cot(x) = 1/tan(x)
+        beta_corr = alpha / np.tan(np.pi * n / 2.0)
+    else:
+        # n=1 特例：对数色散
+        if omega_ref is None:
+            # 取频带中心作为参考，保证相位连续
+            omega_ref = float(np.median(omega))
+        beta_corr = (2.0 * alpha0 / np.pi) * omega * np.log(omega / omega_ref)
+
+    # 复波数：相位项 + 色散修正 - i*衰减
+    k = (omega / c0) + beta_corr - 1j * alpha
+    return k
+
+
+def S_layer(omega: np.ndarray,
+            c_p: float,
+            d: float,
+            alpha_np_per_m: Optional[np.ndarray] = None,
+            *,
+            causal: bool = False,
+            alpha0: Optional[float] = None,
+            n: Optional[float] = None,
+            omega0: Optional[float] = None,
+            omega_ref: Optional[float] = None
+            ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    均匀各向同性纵波层的 S-矩阵：
+        S = [[0, E],
+             [E, 0]],   其中  E(ω) = exp(-i k(ω) d)
+    - 非因果(默认)：使用 alpha_np_per_m 仅作幅度衰减，k = ω/c_p - i*alpha
+    - 因果(causal=True)：启用因果幂律，k = ω/c_p + Δβ(ω) - i*α(ω)
+
+    参数
+    ----
+    omega : [F] 角频率 (rad/s)
+    c_p   : 相速度 (m/s)
+    d     : 厚度 (m)
+    alpha_np_per_m : [F] 或 None，若给定，在 causal=False 时用于衰减（Np/m）
+    causal: 是否启用因果幂律模型
+    alpha0, n, omega0: 因果幂律所需参数（Np/m @ ω0，幂指数 n，参考角频率 ω0）
+    omega_ref: n=1 情况下对数色散的参考角频率（缺省取频带中位数）
+
+    返回
+    ----
+    (S11, S12, S21, S22) 其中 S11=S22=0, S12=S21=E
+    """
+    omega = np.asarray(omega, dtype=float)
+
+    if causal:
+        if (alpha0 is None) or (n is None) or (omega0 is None):
+            raise ValueError("causal=True 需提供 alpha0, n, omega0（单位：alpha0 为 Np/m 对应 ω0）。")
+        # 使用因果幂律生成复波数
+        k = complex_k_powerlaw(omega, c0=c_p, alpha0=alpha0, n=n, omega0=omega0, omega_ref=omega_ref)
+        E = np.exp(-1j * k * d)  # 注意此处 k 已含 -i*α 项
+    else:
+        # 兼容原逻辑：仅幅度衰减（若未提供则视作零衰减）
+        if alpha_np_per_m is None:
+            alpha = 0.0
+        else:
+            alpha = np.asarray(alpha_np_per_m, dtype=float)
+        # gamma = alpha + i*k ；E = exp(-gamma d) = exp(-α d) * exp(-i k d)
+        k_real = omega / c_p
+        E = np.exp(-(alpha + 1j * k_real) * d)
+
+    # 组装 S（各频点独立，直接返回 4 个 [F] 向量）
     Z = np.zeros_like(E, dtype=complex)
-    return (Z, E, E, Z)
-
+    return Z, E, E, Z
 # ---------- 阻抗片（等效二端口，以 T 域注入后转 S） ----------
-
 def S_impedance_sheet(omega: np.ndarray, ZL: float, ZR: float,
                       m_prime: float = 0.0, R_prime: float = 0.0,
-                      K_n: Optional[float] = None, tan_delta: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                      K_n: Optional[float] = None,
+                      tan_delta: Optional[float] = None,
+                      K_n_of_omega: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+                      R_prime_of_omega: Optional[Callable[[np.ndarray], np.ndarray]] = None
+                      ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two-port S of a *series* impedance sheet placed between media with impedances (ZL, ZR).
+    Z_sheet(ω) = jω m′ + R′(ω) + K_n*(ω)/(jω), where K_n*(ω) = K_n·(1 + j tanδ) if scalar.
+
+    Parameters
+    ----------
+    omega : array-like [F]
+    ZL, ZR : float
+        Reference impedances of the adjacent media.
+    m_prime : float
+        Areal mass density ρ_a d_a [kg/m²].
+    R_prime : float
+        Additional real loss per area [Pa·s/m] (constant part). Use R_prime_of_omega for frequency dependence.
+    K_n : float, optional
+        Normal stiffness per area [Pa/m] for the elastic part.
+    tan_delta : float, optional
+        Loss factor of the stiffness (Kelvin–Voigt style). If provided with K_n, K_n*(ω)=K_n (1 + j tanδ).
+    K_n_of_omega : callable, optional
+        If provided, overrides (K_n, tan_delta) with an explicit frequency-dependent complex stiffness per area.
+    R_prime_of_omega : callable, optional
+        If provided, adds a frequency-dependent real loss term to R′.
+
+    Returns
+    -------
+    (S11, S12, S21, S22) : 4 arrays of shape [F]
     """
-    串联界面阻抗片：
-      Z_sheet(ω) = jω m' + R' + K_n*(ω)/(jω), 其中 K_n*(ω) = K_n * (1 + j*tanδ)（若给定）
-    该元件的 T 矩阵： [[1, Z_sheet],[0,1]] ，端口参考为左右介质阻抗 ZL, ZR
-    返回相应的 S-矩阵。
-    """
-    Kstar = 0.0
-    if K_n is not None:
-        if tan_delta is None: tan_delta = 0.0
-        Kstar = K_n * (1.0 + 1j * tan_delta)
-    Z_sheet = 1j * omega * m_prime + R_prime + (Kstar / (1j * omega) if K_n is not None else 0.0)
-    # 组装 T，再转 S
-    T = np.zeros((omega.shape[0], 2, 2), dtype=complex)
+    omega = np.asarray(omega, dtype=float)
+
+    # Build complex stiffness per area K*(ω)
+    if K_n_of_omega is not None:
+        Kstar = np.asarray(K_n_of_omega(omega), dtype=complex)
+    else:
+        if K_n is None:
+            Kstar = 0.0
+        else:
+            td = 0.0 if tan_delta is None else tan_delta
+            Kstar = K_n * (1.0 + 1j * td)
+
+    # Real loss term R′(ω)
+    if R_prime_of_omega is not None:
+        Rw = R_prime + np.asarray(R_prime_of_omega(omega), dtype=float)
+    else:
+        Rw = float(R_prime)
+
+    # Series impedance of the sheet across frequency
+    Kstar = np.asarray(Kstar, dtype=complex)
+    Z_sheet = 1j * omega * m_prime + Rw + (Kstar / (1j * omega) if np.any(Kstar) else 0.0)
+
+    # Convert to T, then to S referenced to (ZL, ZR)
+    F = omega.shape[0]
+    T = np.zeros((F, 2, 2), dtype=complex)
     T[:, 0, 0] = 1.0
     T[:, 1, 1] = 1.0
     T[:, 0, 1] = Z_sheet
     T[:, 1, 0] = 0.0
     return T_to_S(T, ZL, ZR)
+
 # ---------- T ↔ S 转换（用于阻抗片等“二端口”从 T 域注入） ----------
 
 def T_to_S(T: np.ndarray, ZL: float, ZR: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -243,41 +360,3 @@ def build_structure_S(omega: np.ndarray,
     # 折叠
     S_tot = fold_star(blocks)
     return S_tot
-
-# ---------- 使用示意（把数值替换掉即可） ----------
-if __name__ == "__main__":
-    # 频率轴
-    fmin, fmax, N = 0.5e6, 5e6, 4096
-    f = np.linspace(fmin, fmax, N)
-    omega = 2*np.pi*f
-    omega0 = 2*np.pi*((fmin+fmax)/2)
-
-    # 示例层参数（请替换为你的数值；钢的衰减可以设 alpha0=0）
-    water = LayerParam(rho=1000, c_p=1480, d=0.0)  # 左端若为半空间，只需 rho,c_p
-    steel1 = LayerParam(rho=7850, c_p=5900, d=0.002, alpha0=0.0, n=1.0)
-    epoxy1 = LayerParam(rho=1200, c_p=2500, d=1e-4, alpha0=5.0, n=1.2)  # 示例
-    rubber1 = LayerParam(rho=1100, c_p=1600, d=6e-4, alpha0=10.0, n=1.3)
-    epoxy2 = LayerParam(rho=1200, c_p=2500, d=1e-4, alpha0=5.0, n=1.2)
-
-    sheet = dict(m_prime=0.2, R_prime=5.0)  # 面密度 kg/m^2、面阻 Pa·s/m；先从两参开始
-
-    epoxy3 = LayerParam(rho=1200, c_p=2500, d=1e-4, alpha0=5.0, n=1.2)
-    rubber2 = LayerParam(rho=1100, c_p=1600, d=6e-4, alpha0=10.0, n=1.3)
-    epoxy4 = LayerParam(rho=1200, c_p=2500, d=1e-4, alpha0=5.0, n=1.2)
-    steel2 = LayerParam(rho=7850, c_p=5900, d=0.002, alpha0=0.0, n=1.0)
-    right = LayerParam(rho=1000, c_p=1480, d=0.0)  # 右端若为水半无限
-
-    S_tot = build_structure_S(
-        omega, left_medium=water, right_medium=right,
-        steel1=steel1, epoxy1=epoxy1, rubber1=rubber1, epoxy2=epoxy2,
-        sheet_params=sheet, epoxy3=epoxy3, rubber2=rubber2, epoxy4=epoxy4, steel2=steel2,
-        omega0=omega0
-    )
-
-    # 回波与透射核（右端并入半无限 ⇒ Γ_L=0）
-    Gamma_in = gamma_in_from_S(S_tot, Gamma_L=None)
-    T_eff = Teff_from_S(S_tot, Gamma_L=None)
-
-    # 简单检查：被动性（|Γ|≤1）与形状
-    assert np.all(np.abs(Gamma_in) <= 1.0000001 + 1e-6), "Passive check failed (tune eps or params)."
-    print("Gamma_in shape:", Gamma_in.shape, "T_eff shape:", T_eff.shape)
