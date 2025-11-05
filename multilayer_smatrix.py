@@ -280,6 +280,22 @@ def Teff_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     denom = 1.0 - S22 * Gamma_L + 1j * eps
     return S21 / denom
 
+# ---------- 能量核对（无耗模式） ----------
+def check_energy_conservation(S_tot, ZL, ZR):
+    S11, S12, S21, S22 = S_tot
+    return np.max(np.abs(np.abs(S11)**2 + (np.real(ZR)/np.real(ZL))*np.abs(S21)**2 - 1.0))
+
+# ----------  极小值自动标注：反射自动找谷值，给出频率与半高宽----------
+
+def find_minima(f, mag):
+    # 简单相邻比较；可换成 scipy.signal.find_peaks(-mag)
+    idx = (mag[1:-1] < mag[:-2]) & (mag[1:-1] < mag[2:])
+    idx = np.where(idx)[0] + 1
+    return f[idx], mag[idx]
+
+
+
+
 # ---------- 示例：搭建你的结构（钢-环氧-橡胶-环氧-阻抗片-环氧-橡胶-环氧-钢） ----------
 @dataclass
 class LayerParam:
@@ -327,7 +343,7 @@ def build_structure_S(omega: np.ndarray,
     # EP2 | SHEET | EP3  —— 把阻抗片放在 EP2 与 EP3 之间
     # 先界面 EP2|EP3 的“中间”替换成阻抗片：用 T_sheet 转 S，再星积
     S_sheet = S_impedance_sheet(
-        omega, ZL=Z(epoxy2), ZR=Z(epoxy2),  # 阻抗片两侧端口参考：可取与相邻介质一致；若两侧不同介质也可用 ZL,ZR 不同
+        omega, ZL=Z(epoxy2), ZR=Z(epoxy3),  # 阻抗片两侧端口参考：可取与相邻介质一致；若两侧不同介质也可用 ZL,ZR 不同
         m_prime=sheet_params.get('m_prime', 0.0),
         R_prime=sheet_params.get('R_prime', 0.0),
         K_n=sheet_params.get('K_n', None),
