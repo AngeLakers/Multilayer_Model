@@ -18,7 +18,7 @@ import json
 import numpy as np
 
 # 只依赖你画布里的 StructureBuilder；其内部再调用 multilayer_smatrix 提供的函数
-from builder import StructureBuilder
+from Structure_builder import StructureBuilder
 
 
 def load_json(path: str) -> Dict[str, Any]:
@@ -72,14 +72,24 @@ def build_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             L = layers_by_name[ref]
             med = media[L['medium']]
             c_p = float(med['c_p']); d = float(L['thickness_m'])
+
             att = L.get('atten', None)
+
             if att is None:
                 sb.add_layer(c_p=c_p, d=d, causal=False)
             else:
-                sb.add_layer(c_p=c_p, d=d, causal=True,
-                             alpha0=float(att['alpha0_Np_per_m']),
-                             n=float(att['n']),
-                             omega0=2*np.pi*float(att['f0_Hz']))
+                n = float(att['n'])
+                alpha0 = float(att['alpha0_Np_per_m'])
+                omega0 = 2 * np.pi * float(att['f0_Hz'])
+             # n 合法就走因果；否则退回“非因果幅度衰减”
+                if (0.0 < n < 2.0) and (abs(n - 1.0) > 1e-3):
+                    sb.add_layer(c_p=c_p, d=d, causal=True, alpha0=alpha0, n=n, omega0=omega0)
+                else:
+                    # 非因果分支：构造 alpha(ω) 并传入 alpha_np_per_m
+                    from multilayer_smatrix import alpha_powerlaw
+                    alpha = alpha_powerlaw(omega, alpha0=alpha0, n=n, omega0=omega0)
+                    sb.add_layer(c_p=c_p, d=d, causal=False, alpha_np_per_m=alpha)
+
         elif kind == 'adhesive':
             ref = item['ref']
             A = adhesives[ref]

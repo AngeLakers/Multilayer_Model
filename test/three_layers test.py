@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# After
 from multilayer_smatrix import (
     S_interface, S_layer, fold_star, gamma_in_from_S,
-    LayerParam, alpha_powerlaw
+    alpha_powerlaw
 )
+from multilayer_smatrix import LayerParam  # Fix: Import LayerParam explicitly
 
 # --------------------- frequency axis ---------------------
 f_start = 0.1e6   # 100 kHz
