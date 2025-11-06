@@ -35,7 +35,6 @@ def S_interface(Za: float, Zb: float) -> Tuple[np.ndarray, np.ndarray, np.ndarra
     return np.asarray(r), np.asarray(tba), np.asarray(tab), np.asarray(-r)
 
 
-
 def complex_k_powerlaw(omega: np.ndarray,
                        c0: float,
                        alpha0: float,
@@ -49,12 +48,21 @@ def complex_k_powerlaw(omega: np.ndarray,
     n = 1 时：Δβ(ω) = (2 α0 / π) * ω * ln(ω / ω_ref)
     """
     # 幂律衰减（Np/m）
+    # --- 合法性：n 必须在 (0,2)，否则因果模型无定义/数值病态 ---
+
+    if not (0.0 < n < 2.0):
+
+        raise ValueError(f"causal power-law requires 0<n<2; got n={n}")
     alpha = alpha0 * (omega / omega0) ** n
 
     # 因果色散修正
     if abs(n - 1.0) > 1e-8:
         # Δβ = α * cot(π n / 2)；cot(x) = 1/tan(x)
-        beta_corr = alpha / np.tan(np.pi * n / 2.0)
+        denom = np.tan(np.pi * n / 2.0)
+        if abs(denom) < 1e-8:
+             # 极近奇点，改抛错而不是装死
+            raise ValueError(f"tan(pi*n/2) ~ 0 at n={n}, unstable for causal model")
+        beta_corr = alpha / denom
     else:
         # n=1 特例：对数色散
         if omega_ref is None:
@@ -280,83 +288,18 @@ def Teff_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     denom = 1.0 - S22 * Gamma_L + 1j * eps
     return S21 / denom
 
-# ---------- 示例：搭建你的结构（钢-环氧-橡胶-环氧-阻抗片-环氧-橡胶-环氧-钢） ----------
-@dataclass
-class LayerParam:
-    rho: float
-    c_p: float
-    d: float
-    alpha0: float = 0.0   # 幂律 A
-    n: float = 1.0        # 幂律 n
-    # 若需要更复杂的因果模型，可自行扩展为 c(ω)
+# ---------- 能量核对（无耗模式） ----------
+def check_energy_conservation(S_tot, ZL, ZR):
+    S11, S12, S21, S22 = S_tot
+    return np.max(np.abs(np.abs(S11)**2 + (np.real(ZR)/np.real(ZL))*np.abs(S21)**2 - 1.0))
 
-def build_structure_S(omega: np.ndarray,
-                      left_medium: LayerParam,   # 左半空间（例如水），仅需 rho,c_p
-                      right_medium: LayerParam,  # 右半空间或把右侧并入后这里不用
-                      steel1: LayerParam, epoxy1: LayerParam, rubber1: LayerParam, epoxy2: LayerParam,
-                      sheet_params: Dict[str, float],  # {'m_prime':...,'R_prime':...,'K_n':...,'tan_delta':...} 可只给前两项
-                      epoxy3: LayerParam, rubber2: LayerParam, epoxy4: LayerParam, steel2: LayerParam,
-                      omega0: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    返回整条链的 S_tot（四个 [F] 复数组）
-    """
-    # 介质阻抗
-    Z = lambda p: p.rho * p.c_p
-    # 各层衰减（Np/m）
-    a = lambda p: alpha_powerlaw(omega, p.alpha0, p.n, omega0)
+# ----------  极小值自动标注：反射自动找谷值，给出频率与半高宽----------
 
-    blocks = []
+def find_minima(f, mag):
+    # 简单相邻比较；可换成 scipy.signal.find_peaks(-mag)
+    idx = (mag[1:-1] < mag[:-2]) & (mag[1:-1] < mag[2:])
+    idx = np.where(idx)[0] + 1
+    return f[idx], mag[idx]
 
-    # 左端界面 L|S1
-    blocks.append(S_interface(Z(left_medium), Z(steel1)))
-    # S1 层
-    blocks.append(S_layer(omega, steel1.c_p, steel1.d, a(steel1)))
-    # S1|EP1
-    blocks.append(S_interface(Z(steel1), Z(epoxy1)))
-    # EP1
-    blocks.append(S_layer(omega, epoxy1.c_p, epoxy1.d, a(epoxy1)))
-    # EP1|R1
-    blocks.append(S_interface(Z(epoxy1), Z(rubber1)))
-    # R1
-    blocks.append(S_layer(omega, rubber1.c_p, rubber1.d, a(rubber1)))
-    # R1|EP2
-    blocks.append(S_interface(Z(rubber1), Z(epoxy2)))
-    # EP2
-    blocks.append(S_layer(omega, epoxy2.c_p, epoxy2.d, a(epoxy2)))
 
-    # EP2 | SHEET | EP3  —— 把阻抗片放在 EP2 与 EP3 之间
-    # 先界面 EP2|EP3 的“中间”替换成阻抗片：用 T_sheet 转 S，再星积
-    S_sheet = S_impedance_sheet(
-        omega, ZL=Z(epoxy2), ZR=Z(epoxy2),  # 阻抗片两侧端口参考：可取与相邻介质一致；若两侧不同介质也可用 ZL,ZR 不同
-        m_prime=sheet_params.get('m_prime', 0.0),
-        R_prime=sheet_params.get('R_prime', 0.0),
-        K_n=sheet_params.get('K_n', None),
-        tan_delta=sheet_params.get('tan_delta', None)
-    )
-    # 把 S_sheet 直接接在 EP2 末端，然后再接 EP3
-    blocks.append(S_sheet)
 
-    # EP2|EP3 物理上依然是“同材界面”，若希望仅保留阻抗片的作用，下面这一步界面可省略；
-    # 若阻丝与胶材存在真实过渡/界面，你也可以保留一个 EP2->EP3 的界面块：
-    # blocks.append(S_interface(Z(epoxy2), Z(epoxy3)))   # 视物理需要选择
-    # EP3
-    blocks.append(S_layer(omega, epoxy3.c_p, epoxy3.d, a(epoxy3)))
-
-    # EP3|R2
-    blocks.append(S_interface(Z(epoxy3), Z(rubber2)))
-    # R2
-    blocks.append(S_layer(omega, rubber2.c_p, rubber2.d, a(rubber2)))
-    # R2|EP4
-    blocks.append(S_interface(Z(rubber2), Z(epoxy4)))
-    # EP4
-    blocks.append(S_layer(omega, epoxy4.c_p, epoxy4.d, a(epoxy4)))
-    # EP4|S2
-    blocks.append(S_interface(Z(epoxy4), Z(steel2)))
-    # S2
-    blocks.append(S_layer(omega, steel2.c_p, steel2.d, a(steel2)))
-    # S2|R
-    blocks.append(S_interface(Z(steel2), Z(right_medium)))
-
-    # 折叠
-    S_tot = fold_star(blocks)
-    return S_tot
