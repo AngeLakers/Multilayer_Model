@@ -36,3 +36,8 @@ H(ω)=Γin(ω)。
 
 数据流：config.json → builder_config.build_from_config → StructureBuilder(调用 multilayer_smatrix) → S_tot → H(ω)
 边界明确后，调参、换结构只改 JSON；写脚本/训练时只碰 builder.py 的 API。
+
+4)test等py
+
+作用：测试不同工况，
+分为最早/脚本运作/脚本带基线归一(V3)的 py脚本,常规性调用。
