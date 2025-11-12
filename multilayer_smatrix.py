@@ -233,7 +233,7 @@ def S_to_T(S: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], ZL: float, 
 
 def star(SA: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
          SB: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-         eps: float = 1e-18) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+         eps_rel: float = 1e-12) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     SA ⋆ SB ，两块连接：SA 在左、SB 在右。
     都是 (S11,S12,S21,S22)，每个是 [F] 复数组或标量（将广播）。
@@ -247,8 +247,11 @@ def star(SA: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     D1 = 1.0 - A22 * B11
     D2 = 1.0 - B11 * A22
     # 正则化以避免频带近极点的数值问题
-    D1 = D1 + eps * 1j
-    D2 = D2 + eps * 1j
+
+    eps1 = eps_rel * np.maximum(1.0, np.abs(D1))
+    eps2 = eps_rel * np.maximum(1.0, np.abs(D2))
+    D1 = D1 + eps1 * 1j
+    D2 = D2 + eps2 * 1j
 
     S11 = A11 + A12 * B11 / D1 * A21
     S12 = A12 / D2 * B12
@@ -268,7 +271,7 @@ def fold_star(blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 # ---------- 输出核 ----------
 def gamma_in_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-                    Gamma_L: Optional[np.ndarray] = None, eps: float = 1e-18) -> np.ndarray:
+                    Gamma_L: Optional[np.ndarray] = None, eps_rel: float = 1e-12) -> np.ndarray:
     """
     入端等效反射 Γ_in = S11 + S12 Γ_L (1 - S22 Γ_L)^-1 S21
     若右端多层已并入，取 Γ_L = 0 ⇒ Γ_in = S11。
@@ -276,18 +279,20 @@ def gamma_in_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     S11, S12, S21, S22 = S_tot
     if Gamma_L is None:
         return S11
-    denom = 1.0 - S22 * Gamma_L + 1j * eps
+    denom = 1.0 - S22 * Gamma_L
+    denom = denom + 1j * (eps_rel * np.maximum(1.0, np.abs(denom)))
     return S11 + S12 * Gamma_L / denom * S21
 
 def Teff_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-                Gamma_L: Optional[np.ndarray] = None, eps: float = 1e-18) -> np.ndarray:
+                Gamma_L: Optional[np.ndarray] = None, eps_rel: float = 1e-12) -> np.ndarray:
     """
     透射有效核：T_eff = (1 - S22 Γ_L)^-1 S21；半无限匹配右端时 Γ_L = 0 ⇒ T_eff = S21。
     """
     S11, S12, S21, S22 = S_tot
     if Gamma_L is None:
         return S21
-    denom = 1.0 - S22 * Gamma_L + 1j * eps
+    denom = 1.0 - S22 * Gamma_L
+    denom = denom + 1j * (eps_rel * np.maximum(1.0, np.abs(denom)))
     return S21 / denom
 
 # 新增：压力归一 S → 功率系数 R/T/A
