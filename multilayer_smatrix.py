@@ -128,6 +128,8 @@ def S_layer(omega: np.ndarray,
     # 组装 S（各频点独立，直接返回 4 个 [F] 向量）
     Z = np.zeros_like(E, dtype=complex)
     return Z, E, E, Z
+
+
 # ---------- 阻抗片（等效二端口，以 T 域注入后转 S） ----------
 def S_impedance_sheet(omega: np.ndarray, ZL: float, ZR: float,
                       m_prime: float = 0.0, R_prime: float = 0.0,
@@ -287,6 +289,16 @@ def Teff_from_S(S_tot: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         return S21
     denom = 1.0 - S22 * Gamma_L + 1j * eps
     return S21 / denom
+
+# 新增：压力归一 S → 功率系数 R/T/A
+def compute_RTA(S_tot, ZL, ZR):
+    S11, S12, S21, S22 = S_tot
+    R = np.abs(S11)**2
+    # 端口功率修正：I = |p|^2/(2 Re{Z})
+    T = np.abs(S21)**2 * (np.real(ZL) / np.real(ZR))
+    A = 1.0 - R - T
+    return R, T, np.maximum(A, 0.0)
+
 
 # ---------- 能量核对（无耗模式） ----------
 def check_energy_conservation(S_tot, ZL, ZR):

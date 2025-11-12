@@ -45,6 +45,41 @@ def _Z(media: Dict[str, Any], name: str) -> float:
     m = media[name]
     return float(m['rho']) * float(m['c_p'])
 
+# 取介质阻抗
+def medium_impedance(cfg, name):
+    m = cfg["media"][name]
+    return float(m["rho"]) * float(m["c_p"])
+
+# 解析端口介质（左端 = 第一个 interface.left；右端 = halfspace.medium；没有 halfspace 就取最后一个 interface.right）
+def resolve_ports(cfg):
+    left = None; right = None
+    for it in cfg.get("chain", []):
+        if it.get("kind") == "interface" and left is None:
+            left = it["left"]
+        if it.get("kind") == "halfspace":
+            right = it["medium"]
+    if right is None:
+        for it in reversed(cfg.get("chain", [])):
+            if it.get("kind") == "interface":
+                right = it["right"]; break
+    return left, right
+
+# 基线透射（入口界面）支持 config 覆盖：baseline_override:{left,right}
+def tau_baseline(cfg):
+    if "baseline_override" in cfg:
+        L = cfg["baseline_override"]["left"]; R = cfg["baseline_override"]["right"]
+    else:
+        # 用链里的第一个 interface 当入口
+        for it in cfg.get("chain", []):
+            if it.get("kind") == "interface":
+                L, R = it["left"], it["right"]; break
+        else:
+            return None, None, None
+    ZL = medium_impedance(cfg, L); ZR = medium_impedance(cfg, R)
+    tau = 4.0 * ZL * ZR / (ZL + ZR)**2
+    return float(tau), L, R
+
+
 
 def build_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
