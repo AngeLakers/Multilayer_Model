@@ -10,10 +10,16 @@ Run:
   python3 -m test.run_config_flow
 """
 from __future__ import annotations
-import os
 from pathlib import Path
 import datetime as _dt
 import numpy as np
+
+# Ensure project root is on sys.path when executing this file directly
+import sys
+_THIS = Path(__file__).resolve()
+_ROOT = _THIS.parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from Builder_config import load_json, build_from_config
 
@@ -136,13 +142,16 @@ def _Z_from_cfg(cfg, medium_name: str) -> float:
     return float(m["rho"]) * float(m["c_p"])
 
 
-def compute_first_interface_baseline_gamma(cfg) -> float | None:
+from typing import Optional
+
+
+def compute_first_interface_baseline_gamma(cfg) -> Optional[float]:
     """
     从 chain 里找到第一个 interface，返回其 |Γ| 基线（频率无关），找不到则返回 None。
     """
     for item in cfg.get("chain", []):
         if item.get("kind") == "interface":
-            left = item["left"];
+            left = item["left"]
             right = item["right"]
             ZL = _Z_from_cfg(cfg, left)
             ZR = _Z_from_cfg(cfg, right)

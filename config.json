@@ -1,6 +1,6 @@
 {
   "frequency": {
-    "start_Hz": 100000.0,
+    "start_Hz": 50000.0,
     "stop_Hz": 2000000.0,
     "step_Hz":1000.0
   },
@@ -8,22 +8,38 @@
     "water":   { "rho": 1000.0, "c_p": 1480.0 },
     "steel":   { "rho": 7850.0, "c_p": 5900.0 },
     "rubber":  { "rho": 1100.0, "c_p": 1600.0 },
-    "aluminum":{ "rho": 2780.0, "c_p": 6320.0 }
+    "aluminum":{ "rho": 2780.0, "c_p": 6320.0 },
+    "polyimide": { "rho": 1420.0, "c_p": 2500.0 }
   },
   "layers": [
     {
-      "name": "steel_1mm",
+      "name": "steel_0.5mm",
       "medium": "steel",
-      "thickness_m": 0.001,
-      "atten": { "alpha0_Np_per_m": 2.0, "n": 2.0, "f0_Hz": 1000000.0 }
+      "thickness_m": 0.0005,
+      "atten": { "alpha0_Np_per_m": 2.0, "n": 1.9, "f0_Hz": 1000000.0 }
     },
+
     {
-      "name": "rubber_1mm",
+      "name": "rubber_0.63mm",
       "medium": "rubber",
-      "thickness_m": 0.001,
-      "atten": { "alpha0_Np_per_m": 80.0, "n": 1.3, "f0_Hz": 1000000.0 }
+      "thickness_m": 0.00063,
+      "atten": { "alpha0_Np_per_m": 300.0, "n": 1.3, "f0_Hz": 1000000.0 }
     }
-  ],
+    ,
+    {
+      "name": "rubber_1.3mm",
+      "medium": "rubber",
+      "thickness_m": 0.0013,
+      "atten": { "alpha0_Np_per_m": 600.0, "n": 1.3, "f0_Hz": 1000000.0 }
+    },
+
+    { "name": "heater_0p1mm",
+      "medium": "polyimide",
+      "thickness_m": 0.0001,
+      "atten": { "alpha0_Np_per_m": 200.0, "n": 1.3, "f0_Hz": 1000000.0 }
+    }
+    ],
+
   "adhesives": {
     "glue_sheet": {
       "mode": "sheet",
@@ -39,16 +55,29 @@
       "thickness_m": 0.00008,
       "c_p": 2000.0,
       "atten": { "alpha0_Np_per_m": 40.0, "n": 1.3, "f0_Hz": 1000000.0 }
+    },
+    "heater_sheet": {
+      "mode": "sheet",
+      "rho": 1420.0,
+      "thickness_m": 0.0001,
+      "E_storage_Pa": 2.5e9, "tan_delta": 0.05, "Rprime_Pa_s_per_m": 0.0
     }
+
   },
 "baseline_override": { "left": "water", "right": "steel" },
   "chain": [
     { "kind": "interface", "left": "water", "right": "steel" },
     { "kind": "halfspace", "medium": "water" },
-    { "kind": "layer",     "ref": "steel_1mm" },
+    { "kind": "layer",     "ref": "steel_0.5mm" },
     { "kind": "adhesive",  "ref": "glue_explicit", "left": "steel", "right": "rubber"},
-    { "kind": "layer",     "ref": "rubber_1mm" },
+    { "kind": "layer",     "ref": "rubber_0.63mm" },
+    { "kind": "adhesive",  "ref": "glue_explicit", "left": "rubber", "right": "polyimide"},
+    { "kind": "layer",     "ref": "heater_0p1mm" },
+    { "kind": "adhesive",  "ref": "glue_explicit", "left": "polyimide", "right": "rubber"},
+    { "kind": "layer",     "ref": "rubber_1.3mm" },
     { "kind": "adhesive",  "ref": "glue_explicit", "left": "rubber", "right": "aluminum"},
+
+
     { "kind": "halfspace", "medium": "aluminum" }
   ]
 }

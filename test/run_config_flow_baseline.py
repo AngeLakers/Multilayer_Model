@@ -1,4 +1,4 @@
- # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Run multilayer config, compute Γ_in plus energy decomposition and *baseline normalization*.
 
@@ -10,7 +10,6 @@ Usage:
   python -m test.run_config_flow_baseline
 """
 from __future__ import annotations
-import os
 from pathlib import Path
 import datetime as _dt
 import numpy as np

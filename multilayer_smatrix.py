@@ -2,8 +2,7 @@
 # multilayer_smatrix.py
 # 1D 正向入射、压力幅值规范。支持：幂律衰减、显式层、界面、阻抗片、Redheffer星积。
 import numpy as np
-from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Callable
+from typing import Tuple, List, Optional, Callable
 
 
 # ---------- 衰减模型 ----------
@@ -233,7 +232,7 @@ def S_to_T(S: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], ZL: float, 
 
 def star(SA: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
          SB: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-         eps_rel: float = 1e-12) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+         eps_rel: float = 1e-12,eps=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     SA ⋆ SB ，两块连接：SA 在左、SB 在右。
     都是 (S11,S12,S21,S22)，每个是 [F] 复数组或标量（将广播）。
@@ -260,13 +259,15 @@ def star(SA: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     return (S11, S12, S21, S22)
 
 def fold_star(blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
-              eps: float = 1e-18):
+              eps_rel: float = 1e-12):
     """
     从左到右折叠一串 S-块
     """
+    if len(blocks) == 0:
+        raise ValueError("fold_star: empty blocks")
     S = blocks[0]
     for b in blocks[1:]:
-        S = star(S, b, eps=eps)
+        S = star(S, b, eps_rel=eps_rel)
     return S
 
 # ---------- 输出核 ----------
@@ -317,6 +318,3 @@ def find_minima(f, mag):
     idx = (mag[1:-1] < mag[:-2]) & (mag[1:-1] < mag[2:])
     idx = np.where(idx)[0] + 1
     return f[idx], mag[idx]
-
-
-

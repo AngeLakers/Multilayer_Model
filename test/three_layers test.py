@@ -6,7 +6,16 @@ from multilayer_smatrix import (
     S_interface, S_layer, fold_star, gamma_in_from_S,
     alpha_powerlaw
 )
-from multilayer_smatrix import LayerParam  # Fix: Import LayerParam explicitly
+# Remove invalid import and define a simple local dataclass instead
+from dataclasses import dataclass
+
+@dataclass
+class LayerParam:
+    rho: float
+    c_p: float
+    d: float
+    alpha0: float
+    n: float
 
 # --------------------- frequency axis ---------------------
 f_start = 0.1e6   # 100 kHz
